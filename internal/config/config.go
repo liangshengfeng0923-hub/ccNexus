@@ -184,6 +184,7 @@ type Config struct {
 	Terminal                  *TerminalConfig `json:"terminal,omitempty"`            // Terminal launcher config
 	Proxy                     *ProxyConfig    `json:"proxy,omitempty"`               // HTTP proxy config
 	CodexProxy                *ProxyConfig    `json:"codexProxy,omitempty"`          // Codex dedicated proxy config
+	APIKeyAuthEnabled         bool            `json:"apiKeyAuthEnabled"`             // Enable API Key authentication for proxy requests
 	mu                        sync.RWMutex
 }
 
@@ -200,6 +201,7 @@ func DefaultConfig() *Config {
 		WindowHeight: 768,     // Default window height
 		ModelsCacheTTL:              30,    // Default 30 minutes
 		ModelsCacheRefreshEnabled:  false, // Default disabled
+		APIKeyAuthEnabled:          false, // Default disabled for backward compatibility
 		Endpoints: []Endpoint{
 			{
 				Name:        "Claude Official",
@@ -826,6 +828,11 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 	}
 	if password, err := storage.GetConfig("basicAuthPassword"); err == nil && password != "" {
 		config.BasicAuthPassword = password
+	}
+
+	// Load API Key Auth config
+	if enabledStr, err := storage.GetConfig("api_key_auth_enabled"); err == nil && enabledStr != "" {
+		config.APIKeyAuthEnabled = enabledStr == "true"
 	}
 
 	return config, nil

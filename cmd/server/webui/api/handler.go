@@ -73,9 +73,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		authMiddleware(http.HandlerFunc(h.handleResetBasicAuthPassword)).ServeHTTP(w, r)
 	case "/api/events":
 		authMiddleware(http.HandlerFunc(h.handleEvents)).ServeHTTP(w, r)
+	case "/api/apikeys":
+		authMiddleware(http.HandlerFunc(h.handleAPIKeys)).ServeHTTP(w, r)
+	case "/api/apikeys/config":
+		authMiddleware(http.HandlerFunc(h.handleAPIKeysConfig)).ServeHTTP(w, r)
 	default:
 		if strings.HasPrefix(path, "/api/endpoints/") {
 			authMiddleware(http.HandlerFunc(h.handleEndpointByName)).ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(path, "/api/apikeys/") {
+			authMiddleware(http.HandlerFunc(h.handleAPIKeyByID)).ServeHTTP(w, r)
 			return
 		}
 		http.NotFound(w, r)

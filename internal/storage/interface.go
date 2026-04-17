@@ -116,6 +116,24 @@ type EndpointStats struct {
 	OutputTokens int64
 }
 
+// APIKey represents an API key for access control
+type APIKey struct {
+	ID         int64      `json:"id"`
+	KeyValue   string     `json:"keyValue"`
+	Name       string     `json:"name"`
+	Enabled    bool       `json:"enabled"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+}
+
+// APIKeyWithPermissions represents an API key with its endpoint permissions
+type APIKeyWithPermissions struct {
+	APIKey
+	EndpointNames []string `json:"endpointNames"`
+}
+
 type Storage interface {
 	// Endpoints
 	GetEndpoints() ([]Endpoint, error)
@@ -146,6 +164,15 @@ type Storage interface {
 	// Config
 	GetConfig(key string) (string, error)
 	SetConfig(key, value string) error
+
+	// API Keys
+	GetAPIKeys() ([]APIKeyWithPermissions, error)
+	GetAPIKeyByID(id int64) (*APIKeyWithPermissions, error)
+	GetAPIKeyByKeyValue(keyValue string) (*APIKeyWithPermissions, error)
+	SaveAPIKey(key *APIKey, endpointNames []string) error
+	UpdateAPIKey(key *APIKey, endpointNames []string) error
+	DeleteAPIKey(id int64) error
+	UpdateAPIKeyLastUsed(keyValue string) error
 
 	// Close
 	Close() error

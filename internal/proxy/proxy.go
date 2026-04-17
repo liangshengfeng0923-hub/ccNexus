@@ -320,6 +320,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	// API Key 验证（在读取请求体之后进行，以便确定目标端点）
+	if p.config.APIKeyAuthEnabled {
+		if !p.__validateAPIKey(r, w, bodyBytes) {
+			return
+		}
+	}
+
 	requestStart := time.Now()
 	reqBytes := len(bodyBytes)
 
@@ -349,7 +356,22 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// 尝试解析客户端指定的端点
 	specifiedEndpoint, modelOverride, resolveErr := p.resolver.ResolveEndpoint(r, bodyBytes)
-	if resolveErr != nil {
+
+	// 检查是否有 API Key 验证时自动选择的端点
+	autoSelectedEndpoint := r.Context().Value("selectedEndpoint")
+	if autoSelectedEndpoint != nil {
+		if ep, ok := autoSelectedEndpoint.(*config.Endpoint); ok {
+			logger.Debug("[API Key Auth] Using auto-selected endpoint from context: %s (model: %s)", ep.Name, ep.Model)
+			specifiedEndpoint = ep
+			// 自动选择端点时，使用端点配置的模型
+			if ep.Model != "" {
+				modelOverride = ep.Model
+				logger.Debug("[API Key Auth] Override model to: %s", modelOverride)
+			}
+		}
+	}
+
+	if resolveErr != nil && specifiedEndpoint == nil {
 		// 端点指定错误，返回错误响应
 		logger.Warn("端点解析失败: %v", resolveErr)
 		w.Header().Set("Content-Type", "application/json")
@@ -370,7 +392,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var useSpecificEndpoint bool
 	if specifiedEndpoint != nil {
 		useSpecificEndpoint = true
-		logger.Debug("[Resolver] 使用指定端点: %s", specifiedEndpoint.Name)
+		logger.Debug("[Resolver] Using specified endpoint: %s (auto-selected=%v)",
+			specifiedEndpoint.Name, autoSelectedEndpoint != nil)
 	}
 
 	maxRetries := p.computeMaxRetries(endpoints)
@@ -888,4 +911,199 @@ func isTransientNetworkError(err error) bool {
 		return true
 	}
 	return false
+}
+
+// __validateAPIKey 验证 API Key 并检查端点权限（内部方法）
+func (p *Proxy) __validateAPIKey(r *http.Request, w http.ResponseWriter, bodyBytes []byte) bool {
+	// 从 Header 或 Query 参数获取 API Key
+	// 支持以下格式（密钥值直接使用，不做任何处理）：
+	// 1. X-API-Key: <密钥>
+	// 2. Authorization: Bearer <密钥>
+	// 3. ?api_key=<密钥>
+	apiKey := r.Header.Get("X-API-Key")
+	if apiKey == "" {
+		// 尝试从 Authorization header 获取
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			// 支持 "Bearer token" 格式
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+				apiKey = parts[1]
+			}
+		}
+	}
+	if apiKey == "" {
+		apiKey = r.URL.Query().Get("api_key")
+	}
+
+	logger.DebugLog("[API Key Auth] API Key provided: %s", maskAPIKeyForLog(apiKey))
+
+	if apiKey == "" {
+		logger.Warn("[API Key Auth] No API Key provided")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"type":"authentication_error","message":"API Key is required"}}`))
+		return false
+	}
+
+	// 验证 API Key
+	keyWithPermissions, err := p.storage.GetAPIKeyByKeyValue(apiKey)
+	if err != nil {
+		logger.Error("[API Key Auth] Failed to validate API key: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":{"type":"internal_error","message":"Failed to validate API key"}}`))
+		return false
+	}
+
+	if keyWithPermissions == nil {
+		logger.Warn("[API Key Auth] Invalid API Key")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"type":"authentication_error","message":"Invalid API Key"}}`))
+		return false
+	}
+
+	logger.DebugLog("[API Key Auth] Key found: name=%s, enabled=%v, endpoints=%v",
+		keyWithPermissions.Name, keyWithPermissions.Enabled, keyWithPermissions.EndpointNames)
+
+	// 检查 API Key 是否启用
+	if !keyWithPermissions.Enabled {
+		logger.Warn("[API Key Auth] API Key is disabled: %s", keyWithPermissions.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":{"type":"authentication_error","message":"API Key is disabled"}}`))
+		return false
+	}
+
+	// 检查 API Key 是否过期
+	if keyWithPermissions.ExpiresAt != nil && time.Now().After(*keyWithPermissions.ExpiresAt) {
+		logger.Warn("[API Key Auth] API Key has expired: %s", keyWithPermissions.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":{"type":"authentication_error","message":"API Key has expired"}}`))
+		return false
+	}
+
+	// 获取请求的目标端点
+	specifiedEndpoint, modelOverride, resolveErr := p.resolver.ResolveEndpoint(r, bodyBytes)
+
+	logger.DebugLog("[API Key Auth] Endpoint resolution: specifiedEndpoint=%v, modelOverride=%v, resolveErr=%v",
+		specifiedEndpoint, modelOverride, resolveErr)
+
+	// 打印 key 允许的端点列表
+	logger.DebugLog("[API Key Auth] Key '%s' permitted endpoints: %v", keyWithPermissions.Name, keyWithPermissions.EndpointNames)
+
+	// 用户是否明确指定了端点
+	userSpecifiedEndpoint := specifiedEndpoint != nil && resolveErr == nil
+
+	if userSpecifiedEndpoint {
+		// 用户指定了端点，检查是否有权限
+		targetEndpointName := specifiedEndpoint.Name
+		hasPermission := false
+		for _, allowedName := range keyWithPermissions.EndpointNames {
+			if allowedName == targetEndpointName {
+				hasPermission = true
+				break
+			}
+		}
+
+		logger.DebugLog("[API Key Auth] User specified endpoint '%s', hasPermission=%v", targetEndpointName, hasPermission)
+
+		if !hasPermission {
+			logger.Warn("[API Key Auth] Access denied to endpoint '%s' for key '%s' (not in permitted list: %v)",
+				targetEndpointName, keyWithPermissions.Name, keyWithPermissions.EndpointNames)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"type":"authentication_error","message":"Access denied to endpoint '` + targetEndpointName + `'"}}`))
+			return false
+		}
+
+		logger.Info("[API Key Auth] Access granted: key=%s, endpoint=%s (user specified)", keyWithPermissions.Name, targetEndpointName)
+	} else {
+		// 用户没有指定端点，从 key 的允许端点中自动选择
+		logger.DebugLog("[API Key Auth] No endpoint specified by user, auto-selecting from permitted endpoints")
+
+		// 解析用户请求的模型
+		var requestPayload struct {
+			Model string `json:"model"`
+		}
+		var requestedModel string
+		if err := json.Unmarshal(bodyBytes, &requestPayload); err == nil {
+			requestedModel = strings.TrimSpace(requestPayload.Model)
+			logger.DebugLog("[API Key Auth] User requested model: %s", requestedModel)
+		}
+
+		allEndpoints := p.getEnabledEndpoints()
+		var selectedEndpoint *config.Endpoint
+		var selectedEndpointName string
+
+		if requestedModel != "" {
+			// 如果用户指定了模型，优先选择支持该模型的端点
+			logger.DebugLog("[API Key Auth] Looking for endpoint that supports model '%s'", requestedModel)
+			for _, allowedName := range keyWithPermissions.EndpointNames {
+				for _, ep := range allEndpoints {
+					if ep.Name == allowedName && ep.Model == requestedModel {
+						selectedEndpoint = &ep
+						selectedEndpointName = allowedName
+						logger.DebugLog("[API Key Auth] Found endpoint '%s' with matching model '%s'", allowedName, requestedModel)
+						break
+					}
+				}
+				if selectedEndpoint != nil {
+					break
+				}
+			}
+		}
+
+		// 如果没有找到匹配模型的端点，按顺序选择第一个有权限的端点
+		if selectedEndpoint == nil {
+			logger.DebugLog("[API Key Auth] No exact model match found, selecting first permitted endpoint")
+			for _, allowedName := range keyWithPermissions.EndpointNames {
+				logger.DebugLog("[API Key Auth] Checking permitted endpoint: %s", allowedName)
+				for _, ep := range allEndpoints {
+					if ep.Name == allowedName {
+						selectedEndpoint = &ep
+						selectedEndpointName = allowedName
+						logger.DebugLog("[API Key Auth] Found enabled endpoint: %s (model: %s)", allowedName, ep.Model)
+						break
+					}
+				}
+				if selectedEndpoint != nil {
+					break
+				}
+			}
+		}
+
+		if selectedEndpoint == nil {
+			logger.Warn("[API Key Auth] No enabled endpoints found for key '%s' (permitted: %v)",
+				keyWithPermissions.Name, keyWithPermissions.EndpointNames)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"type":"authentication_error","message":"No accessible endpoints available"}}`))
+			return false
+		}
+
+		logger.Info("[API Key Auth] Auto-selected endpoint '%s' (model: %s) for key '%s'",
+			selectedEndpointName, selectedEndpoint.Model, keyWithPermissions.Name)
+
+		// 将选中的端点存储到 context 中，供 handleProxy 使用
+		ctx := context.WithValue(r.Context(), "selectedEndpoint", selectedEndpoint)
+		*r = *r.WithContext(ctx)
+	}
+
+	// 更新最后使用时间
+	if err := p.storage.UpdateAPIKeyLastUsed(apiKey); err != nil {
+		logger.Warn("[API Key Auth] Failed to update API key last used time: %v", err)
+	}
+
+	return true
+}
+
+// maskAPIKeyForLog masks API key for logging (show first 8 and last 4 chars)
+func maskAPIKeyForLog(key string) string {
+	if len(key) <= 12 {
+		return "***"
+	}
+	return key[:8] + "***" + key[len(key)-4:]
 }

@@ -133,6 +133,36 @@ class APIClient {
     async updateLogLevel(logLevel) {
         return this.request('PUT', '/config/log-level', { logLevel });
     }
+
+    // API Keys management
+    async getAPIKeys() {
+        return this.request('GET', '/apikeys');
+    }
+
+    async createAPIKey(data) {
+        return this.request('POST', '/apikeys', data);
+    }
+
+    async updateAPIKey(id, data) {
+        return this.request('PUT', `/apikeys/${id}`, data);
+    }
+
+    async deleteAPIKey(id) {
+        return this.request('DELETE', `/apikeys/${id}`);
+    }
+
+    async regenerateAPIKey(id) {
+        return this.request('POST', `/apikeys/${id}/regenerate`);
+    }
+
+    // API Key configuration
+    async getAPIKeysConfig() {
+        return this.request('GET', '/apikeys/config');
+    }
+
+    async updateAPIKeysConfig(data) {
+        return this.request('PUT', '/apikeys/config', data);
+    }
 }
 
 export const api = new APIClient();

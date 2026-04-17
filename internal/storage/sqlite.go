@@ -159,6 +159,27 @@ func (s *SQLiteStorage) initSchema() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS api_keys (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		key_value TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL,
+		enabled BOOLEAN DEFAULT TRUE,
+		expires_at DATETIME,
+		last_used_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS api_key_permissions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		api_key_id INTEGER NOT NULL,
+		endpoint_name TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE,
+		FOREIGN KEY (endpoint_name) REFERENCES endpoints(name) ON DELETE CASCADE,
+		UNIQUE(api_key_id, endpoint_name)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date);
 	CREATE INDEX IF NOT EXISTS idx_daily_stats_endpoint ON daily_stats(endpoint_name);
 	CREATE INDEX IF NOT EXISTS idx_daily_stats_device ON daily_stats(device_id);
@@ -167,6 +188,9 @@ func (s *SQLiteStorage) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_endpoint_credentials_expires_at ON endpoint_credentials(expires_at);
 	CREATE INDEX IF NOT EXISTS idx_credential_rate_limits_updated ON credential_rate_limits(updated_at);
 	CREATE INDEX IF NOT EXISTS idx_credential_usage_endpoint ON credential_usage(endpoint_name);
+	CREATE INDEX IF NOT EXISTS idx_api_keys_key_value ON api_keys(key_value);
+	CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled);
+	CREATE INDEX IF NOT EXISTS idx_api_key_permissions_key_id ON api_key_permissions(api_key_id);
 	`
 
 	if _, err := s.db.Exec(schema); err != nil {
@@ -960,4 +984,257 @@ func (s *SQLiteStorage) mergeAppConfig(tx *sql.Tx, strategy MergeStrategy) error
 	default:
 		return fmt.Errorf("unknown merge strategy: %s", strategy)
 	}
+}
+
+// API Key 相关方法
+
+// GetAPIKeys 获取所有 API Keys 及其权限
+func (s *SQLiteStorage) GetAPIKeys() ([]APIKeyWithPermissions, error) {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		rows, err := s.db.Query(`
+			SELECT id, key_value, name, enabled, expires_at, last_used_at, created_at, updated_at
+			FROM api_keys ORDER BY created_at DESC
+		`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		var results []APIKeyWithPermissions
+		for rows.Next() {
+			var key APIKey
+			var expiresAt, lastUsedAt sql.NullTime
+			if err := rows.Scan(&key.ID, &key.KeyValue, &key.Name, &key.Enabled, &expiresAt, &lastUsedAt, &key.CreatedAt, &key.UpdatedAt); err != nil {
+				return nil, err
+			}
+			if expiresAt.Valid {
+				key.ExpiresAt = &expiresAt.Time
+			}
+			if lastUsedAt.Valid {
+				key.LastUsedAt = &lastUsedAt.Time
+			}
+
+			// 获取权限
+			endpointNames, err := s.__getAPIKeyPermissions(key.ID)
+			if err != nil {
+				return nil, err
+			}
+
+			results = append(results, APIKeyWithPermissions{
+				APIKey:        key,
+				EndpointNames: endpointNames,
+			})
+		}
+
+		return results, rows.Err()
+	}
+
+	// GetAPIKeyByID 根据 ID 获取 API Key 及其权限
+	func (s *SQLiteStorage) GetAPIKeyByID(id int64) (*APIKeyWithPermissions, error) {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		var key APIKey
+		var expiresAt, lastUsedAt sql.NullTime
+		err := s.db.QueryRow(`
+			SELECT id, key_value, name, enabled, expires_at, last_used_at, created_at, updated_at
+			FROM api_keys WHERE id = ?
+		`, id).Scan(&key.ID, &key.KeyValue, &key.Name, &key.Enabled, &expiresAt, &lastUsedAt, &key.CreatedAt, &key.UpdatedAt)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if expiresAt.Valid {
+			key.ExpiresAt = &expiresAt.Time
+		}
+		if lastUsedAt.Valid {
+			key.LastUsedAt = &lastUsedAt.Time
+		}
+
+		endpointNames, err := s.__getAPIKeyPermissions(key.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		return &APIKeyWithPermissions{
+			APIKey:        key,
+			EndpointNames: endpointNames,
+		}, nil
+	}
+
+	// GetAPIKeyByKeyValue 根据 key value 获取 API Key 及其权限
+	func (s *SQLiteStorage) GetAPIKeyByKeyValue(keyValue string) (*APIKeyWithPermissions, error) {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		var key APIKey
+		var expiresAt, lastUsedAt sql.NullTime
+		err := s.db.QueryRow(`
+			SELECT id, key_value, name, enabled, expires_at, last_used_at, created_at, updated_at
+			FROM api_keys WHERE key_value = ?
+		`, keyValue).Scan(&key.ID, &key.KeyValue, &key.Name, &key.Enabled, &expiresAt, &lastUsedAt, &key.CreatedAt, &key.UpdatedAt)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if expiresAt.Valid {
+			key.ExpiresAt = &expiresAt.Time
+		}
+		if lastUsedAt.Valid {
+			key.LastUsedAt = &lastUsedAt.Time
+		}
+
+		endpointNames, err := s.__getAPIKeyPermissions(key.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		return &APIKeyWithPermissions{
+			APIKey:        key,
+			EndpointNames: endpointNames,
+		}, nil
+	}
+
+	// SaveAPIKey 保存新的 API Key 及其权限
+	func (s *SQLiteStorage) SaveAPIKey(key *APIKey, endpointNames []string) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		var expiresAt interface{} = nil
+		if key.ExpiresAt != nil {
+			expiresAt = key.ExpiresAt
+		}
+
+		result, err := tx.Exec(`
+			INSERT INTO api_keys (key_value, name, enabled, expires_at)
+			VALUES (?, ?, ?, ?)
+		`, key.KeyValue, key.Name, key.Enabled, expiresAt)
+		if err != nil {
+			return err
+		}
+
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+
+		// 保存权限
+		if len(endpointNames) > 0 {
+			for _, endpointName := range endpointNames {
+				_, err = tx.Exec(`
+					INSERT INTO api_key_permissions (api_key_id, endpoint_name)
+					VALUES (?, ?)
+				`, id, endpointName)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		return tx.Commit()
+	}
+
+	// UpdateAPIKey 更新 API Key 及其权限
+	func (s *SQLiteStorage) UpdateAPIKey(key *APIKey, endpointNames []string) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		var expiresAt interface{} = nil
+		if key.ExpiresAt != nil {
+			expiresAt = key.ExpiresAt
+		}
+
+		// 更新 API Key
+		_, err = tx.Exec(`
+			UPDATE api_keys
+			SET name = ?, enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, key.Name, key.Enabled, expiresAt, key.ID)
+		if err != nil {
+			return err
+		}
+
+		// 删除旧权限并添加新权限
+		_, err = tx.Exec(`DELETE FROM api_key_permissions WHERE api_key_id = ?`, key.ID)
+		if err != nil {
+			return err
+		}
+
+		if len(endpointNames) > 0 {
+			for _, endpointName := range endpointNames {
+				_, err = tx.Exec(`
+					INSERT INTO api_key_permissions (api_key_id, endpoint_name)
+					VALUES (?, ?)
+				`, key.ID, endpointName)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		return tx.Commit()
+	}
+
+	// DeleteAPIKey 删除 API Key（级联删除权限）
+	func (s *SQLiteStorage) DeleteAPIKey(id int64) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		_, err := s.db.Exec(`DELETE FROM api_keys WHERE id = ?`, id)
+		return err
+	}
+
+	// UpdateAPIKeyLastUsed 更新 API Key 最后使用时间
+	func (s *SQLiteStorage) UpdateAPIKeyLastUsed(keyValue string) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		_, err := s.db.Exec(`
+			UPDATE api_keys
+			SET last_used_at = CURRENT_TIMESTAMP
+			WHERE key_value = ?
+		`, keyValue)
+		return err
+	}
+
+	// __getAPIKeyPermissions 获取 API Key 的端点权限列表（内部方法）
+	func (s *SQLiteStorage) __getAPIKeyPermissions(apiKeyID int64) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT endpoint_name FROM api_key_permissions WHERE api_key_id = ? ORDER BY endpoint_name
+	`, apiKeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+
+	return names, rows.Err()
 }
