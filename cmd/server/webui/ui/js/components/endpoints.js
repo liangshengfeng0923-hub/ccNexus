@@ -3,6 +3,7 @@ import { state } from '../state.js';
 import { notifications } from '../utils/notifications.js';
 import { getTransformerLabel, getStatusBadge } from '../utils/formatters.js';
 import { t } from '../utils/i18n.js';
+import { copyToClipboard as copyText } from '../utils/clipboard.js';
 
 class Endpoints {
     constructor() {
@@ -289,15 +290,15 @@ class Endpoints {
     }
 
     copyToClipboard(text, button) {
-        navigator.clipboard.writeText(text).then(() => {
+        if (copyText(text)) {
             const originalText = button.textContent;
             button.textContent = '✓';
             setTimeout(() => {
                 button.textContent = originalText;
             }, 1000);
-        }).catch(err => {
+        } else {
             notifications.error(t('endpoints.failedToCopy'));
-        });
+        }
     }
 
     getTestStatus(endpointName) {

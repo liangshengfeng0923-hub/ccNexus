@@ -3,6 +3,7 @@ import { state } from '../state.js';
 import { notifications } from '../utils/notifications.js';
 import { getStatusBadge } from '../utils/formatters.js';
 import { t } from '../utils/i18n.js';
+import { copyToClipboard } from '../utils/clipboard.js';
 
 class APIKeys {
 	constructor() {
@@ -216,11 +217,11 @@ class APIKeys {
 		document.querySelectorAll('.copy-key-btn').forEach(btn => {
 			btn.addEventListener('click', () => {
 				const key = btn.dataset.key;
-				navigator.clipboard.writeText(key).then(() => {
+				if (copyToClipboard(key)) {
 					notifications.success(t('apikeys.keyCopied'));
-				}).catch(() => {
+				} else {
 					notifications.error('Failed to copy key');
-				});
+				}
 			});
 		});
 
