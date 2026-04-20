@@ -444,7 +444,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				logger.Warn("[%s] Failed to select token pool credential: %v", endpoint.Name, err)
 				p.stats.RecordError(endpoint.Name)
-				p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 				p.markRequestInactive(endpoint.Name)
 				if endpointAttempts >= 2 && !useSpecificEndpoint {
 					p.rotateEndpoint()
@@ -455,7 +454,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if credential == nil || strings.TrimSpace(credential.AccessToken) == "" {
 				logger.Warn("[%s] No usable token in token pool", endpoint.Name)
 				p.stats.RecordError(endpoint.Name)
-				p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 				p.markRequestInactive(endpoint.Name)
 				if endpointAttempts >= 2 && !useSpecificEndpoint {
 					p.rotateEndpoint()
@@ -481,7 +479,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		} else if apiKey == "" {
 			logger.Warn("[%s] API key mode but apiKey is empty", endpoint.Name)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -494,7 +491,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Error("[%s] %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -509,7 +505,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Error("[%s] Failed to transform request: %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -561,7 +556,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Error("[%s] Failed to create request: %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -600,7 +594,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.markCredentialFailure(credentialID, 0, err.Error())
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -643,7 +636,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.markCredentialFailure(credentialID, 0, err.Error())
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -709,7 +701,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.markCredentialFailure(credentialID, resp.StatusCode, errMsg)
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.stats.RecordError(endpoint.Name)
-			p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
 				p.rotateEndpoint()
@@ -739,7 +730,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 			if skipCredentialPenalty {
 				p.stats.RecordError(endpoint.Name)
-				p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 				p.markRequestInactive(endpoint.Name)
 			} else {
 				if selectedCredential != nil &&
@@ -762,7 +752,6 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				p.markCredentialFailure(credentialID, resp.StatusCode, errMsg)
 				p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 				p.stats.RecordError(endpoint.Name)
-				p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 				p.markRequestInactive(endpoint.Name)
 				endpointAttempts = 0
 				logger.Warn("[%s] Credential auth failed (%d), retrying with next token", endpoint.Name, resp.StatusCode)
@@ -785,11 +774,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if skipCredentialPenalty {
 				p.markCredentialFailure(credentialID, 0, errMsg)
 				p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
-				p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			} else {
 				p.markCredentialFailure(credentialID, resp.StatusCode, errMsg)
 				p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
-				p.__recordAPIKeyUsage(apiKeyID, endpoint.Name, 0, 1, 0, 0)
 			}
 			logger.Warn("[%s] Response %d: %s", endpoint.Name, resp.StatusCode, errMsg)
 			logger.DebugLog("[%s] Response %d: %s", endpoint.Name, resp.StatusCode, errMsg)
@@ -808,6 +795,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 记录最终失败的 API Key 统计
+	if apiKeyID > 0 {
+		p.__recordAPIKeyUsage(apiKeyID, lastEndpointName, 0, 1, 0, 0)
+	}
 	http.Error(w, "All endpoints failed", http.StatusServiceUnavailable)
 }
 
