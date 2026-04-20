@@ -94,6 +94,11 @@ func (s *Stats) SetOnStatsUpdated(callback func(endpointName string, endpointPer
 	s.onStatsUpdated = callback
 }
 
+// DeviceID returns the device ID
+func (s *Stats) DeviceID() string {
+	return s.deviceID
+}
+
 // RecordRequest records a request for an endpoint
 func (s *Stats) RecordRequest(endpointName string) {
 	date := time.Now().Format("2006-01-02")

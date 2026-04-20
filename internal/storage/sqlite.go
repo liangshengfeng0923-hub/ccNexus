@@ -191,6 +191,22 @@ func (s *SQLiteStorage) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_api_keys_key_value ON api_keys(key_value);
 	CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled);
 	CREATE INDEX IF NOT EXISTS idx_api_key_permissions_key_id ON api_key_permissions(api_key_id);
+
+	CREATE TABLE IF NOT EXISTS api_key_daily_stats (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		api_key_id INTEGER NOT NULL,
+		date TEXT NOT NULL,
+		requests INTEGER DEFAULT 0,
+		errors INTEGER DEFAULT 0,
+		input_tokens INTEGER DEFAULT 0,
+		output_tokens INTEGER DEFAULT 0,
+		device_id TEXT DEFAULT 'default',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(api_key_id, date, device_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_api_key_stats_key_id ON api_key_daily_stats(api_key_id);
+	CREATE INDEX IF NOT EXISTS idx_api_key_stats_date ON api_key_daily_stats(date);
 	`
 
 	if _, err := s.db.Exec(schema); err != nil {
@@ -1237,4 +1253,76 @@ func (s *SQLiteStorage) GetAPIKeys() ([]APIKeyWithPermissions, error) {
 	}
 
 	return names, rows.Err()
+}
+
+// RecordAPIKeyDailyStat 记录 API Key 每日的使用统计（UPSERT）
+func (s *SQLiteStorage) RecordAPIKeyDailyStat(stat *APIKeyDailyStat) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO api_key_daily_stats (api_key_id, date, requests, errors, input_tokens, output_tokens, device_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(api_key_id, date, device_id) DO UPDATE SET
+			requests = requests + excluded.requests,
+			errors = errors + excluded.errors,
+			input_tokens = input_tokens + excluded.input_tokens,
+			output_tokens = output_tokens + excluded.output_tokens
+	`, stat.APIKeyID, stat.Date, stat.Requests, stat.Errors, stat.InputTokens, stat.OutputTokens, stat.DeviceID)
+	return err
+}
+
+// GetAPIKeyTotalStats 获取所有 API Key 的总使用量统计
+func (s *SQLiteStorage) GetAPIKeyTotalStats() (map[int64]*EndpointStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT api_key_id, SUM(requests), SUM(errors), SUM(input_tokens), SUM(output_tokens)
+		FROM api_key_daily_stats
+		GROUP BY api_key_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int64]*EndpointStats)
+	for rows.Next() {
+		var keyID int64
+		var stats EndpointStats
+		if err := rows.Scan(&keyID, &stats.Requests, &stats.Errors, &stats.InputTokens, &stats.OutputTokens); err != nil {
+			return nil, err
+		}
+		result[keyID] = &stats
+	}
+	return result, rows.Err()
+}
+
+// GetAPIKeyPeriodStats 获取指定 API Key 在日期范围内的每日统计
+func (s *SQLiteStorage) GetAPIKeyPeriodStats(keyId int64, startDate, endDate string) ([]APIKeyDailyStat, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, api_key_id, date, requests, errors, input_tokens, output_tokens, device_id, created_at
+		FROM api_key_daily_stats
+		WHERE api_key_id = ? AND date >= ? AND date <= ?
+		ORDER BY date DESC
+	`, keyId, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []APIKeyDailyStat
+	for rows.Next() {
+		var stat APIKeyDailyStat
+		if err := rows.Scan(&stat.ID, &stat.APIKeyID, &stat.Date, &stat.Requests, &stat.Errors,
+			&stat.InputTokens, &stat.OutputTokens, &stat.DeviceID, &stat.CreatedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, stat)
+	}
+	return results, rows.Err()
 }

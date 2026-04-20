@@ -116,6 +116,19 @@ type EndpointStats struct {
 	OutputTokens int64
 }
 
+// APIKeyDailyStat represents daily usage statistics for an API key
+type APIKeyDailyStat struct {
+	ID           int64
+	APIKeyID     int64
+	Date         string
+	Requests     int
+	Errors       int
+	InputTokens  int
+	OutputTokens int
+	DeviceID     string
+	CreatedAt    time.Time
+}
+
 // APIKey represents an API key for access control
 type APIKey struct {
 	ID         int64      `json:"id"`
@@ -173,6 +186,11 @@ type Storage interface {
 	UpdateAPIKey(key *APIKey, endpointNames []string) error
 	DeleteAPIKey(id int64) error
 	UpdateAPIKeyLastUsed(keyValue string) error
+
+	// API Key Stats
+	RecordAPIKeyDailyStat(stat *APIKeyDailyStat) error
+	GetAPIKeyTotalStats() (map[int64]*EndpointStats, error)
+	GetAPIKeyPeriodStats(keyId int64, startDate, endDate string) ([]APIKeyDailyStat, error)
 
 	// Close
 	Close() error

@@ -170,7 +170,10 @@ export default {
         inputTokens: 'Input Tokens',
         outputTokens: 'Output Tokens',
         noDataAvailable: 'No data available',
-        failedToLoad: 'Failed to load statistics'
+        failedToLoad: 'Failed to load statistics',
+        apiKeyBreakdown: 'API Key Stats',
+        apiKey: 'API Key',
+        lastUsedAt: 'Last Used'
     },
     testing: {
         title: 'Endpoint Testing',

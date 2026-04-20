@@ -109,6 +109,10 @@ class APIClient {
         return this.request('GET', '/stats/trends');
     }
 
+    async getAPIKeysStatsSummary() {
+        return this.request('GET', '/stats/apikeys/summary');
+    }
+
     // Configuration
     async getConfig() {
         return this.request('GET', '/config');

@@ -61,6 +61,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		authMiddleware(http.HandlerFunc(h.handleStatsMonthly)).ServeHTTP(w, r)
 	case "/api/stats/trends":
 		authMiddleware(http.HandlerFunc(h.handleStatsTrends)).ServeHTTP(w, r)
+	case "/api/stats/apikeys/summary":
+		authMiddleware(http.HandlerFunc(h.handleStatsAPIKeysSummary)).ServeHTTP(w, r)
 	case "/api/config":
 		authMiddleware(http.HandlerFunc(h.handleConfig)).ServeHTTP(w, r)
 	case "/api/config/port":

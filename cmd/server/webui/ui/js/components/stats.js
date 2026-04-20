@@ -23,6 +23,7 @@ class Stats {
                     <button class="btn btn-sm btn-primary period-btn active" data-period="daily">${t('stats.daily')}</button>
                     <button class="btn btn-sm btn-secondary period-btn" data-period="weekly">${t('stats.weekly')}</button>
                     <button class="btn btn-sm btn-secondary period-btn" data-period="monthly">${t('stats.monthly')}</button>
+                    <button class="btn btn-sm btn-secondary period-btn" data-type="apikeys">${t('stats.apiKeyBreakdown')}</button>
                 </div>
 
                 <div id="stats-content"></div>
@@ -37,11 +38,112 @@ class Stats {
                 });
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-primary', 'active');
-                this.loadStats(btn.dataset.period);
+
+                if (btn.dataset.type === 'apikeys') {
+                    this.loadAPIKeyStats();
+                } else {
+                    this.loadStats(btn.dataset.period);
+                }
             });
         });
 
         await this.loadStats('daily');
+    }
+
+    async loadAPIKeyStats() {
+        const container = document.getElementById('stats-content');
+        container.innerHTML = `<div class="empty-state"><p>${t('common.loading') || 'Loading...'}...</p></div>`;
+        try {
+            const data = await api.getAPIKeysStatsSummary();
+            this.renderAPIKeyStats(data.keys || []);
+        } catch (error) {
+            container.innerHTML = `<div class="empty-state"><p>${t('stats.failedToLoad')}: ${error.message}</p></div>`;
+        }
+    }
+
+    renderAPIKeyStats(keys) {
+        const container = document.getElementById('stats-content');
+
+        let totalRequests = 0, totalErrors = 0;
+        let totalInputTokens = 0, totalOutputTokens = 0;
+        keys.forEach(k => {
+            totalRequests += k.requests || 0;
+            totalErrors += k.errors || 0;
+            totalInputTokens += k.inputTokens || 0;
+            totalOutputTokens += k.outputTokens || 0;
+        });
+
+        container.innerHTML = `
+            <div class="grid grid-cols-4 mb-4">
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.totalRequests')}</div>
+                    <div class="stat-value">${formatNumber(totalRequests)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.successful')}</div>
+                    <div class="stat-value">${formatNumber(totalRequests - totalErrors)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.errors')}</div>
+                    <div class="stat-value">${formatNumber(totalErrors)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.totalTokens')}</div>
+                    <div class="stat-value">${formatTokens(totalInputTokens + totalOutputTokens)}</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header card-header-row">
+                    <h3 class="card-title">${t('stats.apiKeyBreakdown')}</h3>
+                    <button class="btn btn-sm btn-secondary" id="refresh-apikey-stats-btn">
+                        ${t('common.refresh')}
+                    </button>
+                </div>
+                <div class="card-body" id="apikey-stats-table">
+                    ${this.renderAPIKeyTable(keys)}
+                </div>
+            </div>
+        `;
+
+        document.getElementById('refresh-apikey-stats-btn').addEventListener('click', () => {
+            this.loadAPIKeyStats();
+        });
+    }
+
+    renderAPIKeyTable(keys) {
+        if (keys.length === 0) {
+            return `<div class="empty-state"><p>${t('stats.noDataAvailable')}</p></div>`;
+        }
+
+        return `
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>${t('stats.apiKey')}</th>
+                            <th>${t('stats.requests')}</th>
+                            <th>${t('stats.errors')}</th>
+                            <th>${t('stats.inputTokens')}</th>
+                            <th>${t('stats.outputTokens')}</th>
+                            <th>${t('stats.lastUsedAt')}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${keys.map(k => `
+                            <tr>
+                                <td><strong>${this.escapeHtml(k.name)}</strong></td>
+                                <td>${formatNumber(k.requests || 0)}</td>
+                                <td>${formatNumber(k.errors || 0)}</td>
+                                <td>${formatTokens(k.inputTokens || 0)}</td>
+                                <td>${formatTokens(k.outputTokens || 0)}</td>
+                                <td>${k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : '—'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
     }
 
     async loadStats(period) {

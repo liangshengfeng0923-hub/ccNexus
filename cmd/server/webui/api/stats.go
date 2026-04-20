@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lich0821/ccNexus/internal/logger"
+	"github.com/lich0821/ccNexus/internal/storage"
 )
 
 // handleStatsSummary returns overall statistics
@@ -235,4 +236,49 @@ func calculatePercentChange(old, new int) float64 {
 		return 100.0
 	}
 	return float64(new-old) / float64(old) * 100.0
+}
+
+// handleStatsAPIKeysSummary 返回所有 API Key 的汇总统计
+func (h *Handler) handleStatsAPIKeysSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	apiKeys, err := h.storage.GetAPIKeys()
+	if err != nil {
+		logger.Error("Failed to get API keys: %v", err)
+		WriteError(w, http.StatusInternalServerError, "Failed to get API keys")
+		return
+	}
+
+	keyStats, err := h.storage.GetAPIKeyTotalStats()
+	if err != nil {
+		logger.Error("Failed to get API key stats: %v", err)
+		WriteError(w, http.StatusInternalServerError, "Failed to get API key stats")
+		return
+	}
+
+	result := make([]map[string]interface{}, 0)
+	for _, ak := range apiKeys {
+		stats := keyStats[ak.ID]
+		if stats == nil {
+			stats = &storage.EndpointStats{}
+		}
+		result = append(result, map[string]interface{}{
+			"id":           ak.ID,
+			"name":         ak.Name,
+			"enabled":      ak.Enabled,
+			"lastUsedAt":   ak.LastUsedAt,
+			"expiresAt":    ak.ExpiresAt,
+			"requests":     stats.Requests,
+			"errors":       stats.Errors,
+			"inputTokens":  stats.InputTokens,
+			"outputTokens": stats.OutputTokens,
+		})
+	}
+
+	WriteSuccess(w, map[string]interface{}{
+		"keys": result,
+	})
 }
