@@ -50,3 +50,4 @@ node_modules/
 # Logs
 *.log
 /cmd/server/ccnexus/
+/docker-debug/ccnexus-data/
