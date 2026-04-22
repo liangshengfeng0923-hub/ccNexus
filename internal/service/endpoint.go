@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1159,6 +1160,53 @@ func isCodexBackendAPIURL(raw string) bool {
 	return strings.HasSuffix(cleanPath, "/backend-api/codex")
 }
 
+// detectAPIVersionInURL 检测 URL 路径中是否包含版本号（如 /v1, /v2, /v4 等）
+// 返回版本字符串（如 "v1", "v4"），未找到则返回空字符串
+func detectAPIVersionInURL(apiURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || parsed == nil {
+		return ""
+	}
+
+	// 清理路径以处理尾部斜杠和重复斜杠
+	cleanPath := path.Clean(parsed.Path)
+	if cleanPath == "/" || cleanPath == "." {
+		return ""
+	}
+
+	// 提取路径段
+	segments := strings.Split(strings.Trim(cleanPath, "/"), "/")
+
+	// 检查每个路径段是否符合版本模式（v 后跟数字）
+	versionPattern := regexp.MustCompile(`^v\d+$`)
+	for _, segment := range segments {
+		if versionPattern.MatchString(segment) {
+			return segment
+		}
+	}
+
+	return ""
+}
+
+// buildOpenAIModelsURL 为 OpenAI 兼容 API 构建适当的模型 URL
+// 智能检测 URL 中已有的版本号，避免重复添加
+func buildOpenAIModelsURL(apiURL string, isCodexBackend bool) string {
+	baseURL := strings.TrimSuffix(apiURL, "/")
+
+	// 特殊情况：Codex 后端直接使用 /models
+	if isCodexBackend {
+		return baseURL + "/models"
+	}
+
+	// 检测 URL 中已有的版本号
+	existingVersion := detectAPIVersionInURL(baseURL)
+	if existingVersion != "" {
+		return baseURL + "/models"
+	}
+
+	return baseURL + "/v1/models"
+}
+
 func isCodexOpenAI2Endpoint(transformer, rawURL string) bool {
 	return strings.TrimSpace(transformer) == "openai2" && isCodexBackendAPIURL(rawURL)
 }
@@ -1394,11 +1442,9 @@ func (e *EndpointService) FetchModels(apiUrl, apiKey, transformer string) string
 }
 
 func (e *EndpointService) fetchOpenAIModels(apiUrl, apiKey, transformer string, credential *storage.EndpointCredential) ([]string, error) {
-	modelsPath := "/v1/models"
-	if isCodexBackendAPIURL(apiUrl) {
-		modelsPath = "/models"
-	}
-	url := fmt.Sprintf("%s%s", strings.TrimSuffix(apiUrl, "/"), modelsPath)
+	// 使用智能版本检测的 URL 构建器
+	isCodexBackend := isCodexBackendAPIURL(apiUrl)
+	url := buildOpenAIModelsURL(apiUrl, isCodexBackend)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -1492,7 +1538,15 @@ func codexRegistryModels() []string {
 }
 
 func (e *EndpointService) fetchGeminiModels(apiUrl, apiKey string) ([]string, error) {
-	url := fmt.Sprintf("%s/v1beta/models?key=%s", apiUrl, apiKey)
+	// 检查 URL 是否已有版本号
+	existingVersion := detectAPIVersionInURL(apiUrl)
+	var url string
+
+	if existingVersion != "" {
+		url = fmt.Sprintf("%s/models?key=%s", strings.TrimSuffix(apiUrl, "/"), apiKey)
+	} else {
+		url = fmt.Sprintf("%s/v1beta/models?key=%s", strings.TrimSuffix(apiUrl, "/"), apiKey)
+	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

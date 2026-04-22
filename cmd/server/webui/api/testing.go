@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -76,7 +79,7 @@ func (h *Handler) sendTestRequest(endpoint *storage.Endpoint) (string, error) {
 
 	switch endpoint.Transformer {
 	case "claude":
-		url = fmt.Sprintf("%s/v1/messages", endpoint.APIUrl)
+		url = buildMessagesURL(endpoint.APIUrl)
 		reqBody, err = json.Marshal(map[string]interface{}{
 			"model": "claude-3-5-sonnet-20241022",
 			"messages": []map[string]interface{}{
@@ -88,7 +91,7 @@ func (h *Handler) sendTestRequest(endpoint *storage.Endpoint) (string, error) {
 			"max_tokens": 16,
 		})
 	case "openai", "openai2":
-		url = fmt.Sprintf("%s/v1/chat/completions", endpoint.APIUrl)
+		url = buildChatCompletionsURL(endpoint.APIUrl)
 		model := endpoint.Model
 		if model == "" {
 			model = "gpt-4"
@@ -270,7 +273,8 @@ func (h *Handler) fetchModelsFromProvider(apiUrl, apiKey, transformer string) ([
 
 	switch transformer {
 	case "openai", "openai2":
-		url = fmt.Sprintf("%s/v1/models", apiUrl)
+		// 使用智能版本检测的 URL 构建器
+		url = buildOpenAIModelsURL(apiUrl)
 		authHeader = "Bearer " + apiKey
 	case "claude":
 		// Claude doesn't have a models endpoint, return known models
@@ -330,4 +334,74 @@ func (h *Handler) fetchModelsFromProvider(apiUrl, apiKey, transformer string) ([
 	}
 
 	return models, nil
+}
+
+// detectAPIVersionInURL 检测 URL 路径中是否包含版本号（如 /v1, /v2, /v4 等）
+// 返回版本字符串（如 "v1", "v4"），未找到则返回空字符串
+func detectAPIVersionInURL(apiURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || parsed == nil {
+		return ""
+	}
+
+	// 清理路径以处理尾部斜杠和重复斜杠
+	cleanPath := path.Clean(parsed.Path)
+	if cleanPath == "/" || cleanPath == "." {
+		return ""
+	}
+
+	// 提取路径段
+	segments := strings.Split(strings.Trim(cleanPath, "/"), "/")
+
+	// 检查每个路径段是否符合版本模式（v 后跟数字）
+	versionPattern := regexp.MustCompile(`^v\d+$`)
+	for _, segment := range segments {
+		if versionPattern.MatchString(segment) {
+			return segment
+		}
+	}
+
+	return ""
+}
+
+// buildOpenAIModelsURL 为 OpenAI 兼容 API 构建适当的模型 URL
+// 智能检测 URL 中已有的版本号，避免重复添加
+func buildOpenAIModelsURL(apiURL string) string {
+	baseURL := strings.TrimSuffix(apiURL, "/")
+
+	// 检测 URL 中已有的版本号
+	existingVersion := detectAPIVersionInURL(baseURL)
+	if existingVersion != "" {
+		return baseURL + "/models"
+	}
+
+	return baseURL + "/v1/models"
+}
+
+// buildChatCompletionsURL 为 OpenAI 兼容 API 构建适当的聊天完成 URL
+// 智能检测 URL 中已有的版本号，避免重复添加
+func buildChatCompletionsURL(apiURL string) string {
+	baseURL := strings.TrimSuffix(apiURL, "/")
+
+	// 检测 URL 中已有的版本号
+	existingVersion := detectAPIVersionInURL(baseURL)
+	if existingVersion != "" {
+		return baseURL + "/chat/completions"
+	}
+
+	return baseURL + "/v1/chat/completions"
+}
+
+// buildMessagesURL 为 Claude API 构建适当的消息 URL
+// 智能检测 URL 中已有的版本号，避免重复添加
+func buildMessagesURL(apiURL string) string {
+	baseURL := strings.TrimSuffix(apiURL, "/")
+
+	// 检测 URL 中已有的版本号
+	existingVersion := detectAPIVersionInURL(baseURL)
+	if existingVersion != "" {
+		return baseURL + "/messages"
+	}
+
+	return baseURL + "/v1/messages"
 }

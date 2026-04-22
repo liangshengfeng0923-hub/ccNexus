@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -79,12 +82,8 @@ func (p *Proxy) fetchModelsFromEndpoint(ep config.Endpoint) ([]ModelInfo, error)
 	switch strings.ToLower(ep.Transformer) {
 	case "openai", "openai2":
 		// OpenAI compatible endpoints
-		baseURL := strings.TrimSuffix(ep.APIUrl, "/")
-		if strings.Contains(baseURL, "/v1") {
-			modelsURL = baseURL + "/models"
-		} else {
-			modelsURL = baseURL + "/v1/models"
-		}
+		isCodexBackend := isCodexBackendURL(ep.APIUrl)
+		modelsURL = buildModelsURL(ep.APIUrl, ep.Transformer, isCodexBackend)
 		req, err = http.NewRequest("GET", modelsURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
@@ -96,12 +95,7 @@ func (p *Proxy) fetchModelsFromEndpoint(ep config.Endpoint) ([]ModelInfo, error)
 
 	case "gemini":
 		// Google Gemini endpoints
-		baseURL := strings.TrimSuffix(ep.APIUrl, "/")
-		if strings.Contains(baseURL, "/v1") {
-			modelsURL = baseURL + "/models"
-		} else {
-			modelsURL = baseURL + "/v1beta/models"
-		}
+		modelsURL = buildModelsURL(ep.APIUrl, ep.Transformer, false)
 		// Add API key as query parameter
 		if ep.AuthMode == config.AuthModeAPIKey && ep.APIKey != "" {
 			modelsURL = modelsURL + "?key=" + ep.APIKey
@@ -312,4 +306,77 @@ func (p *Proxy) refreshModelsCache() {
 
 	p.modelsCache.Set(allModels)
 	logger.Debug("Models cache refreshed, total models: %d", len(allModels))
+}
+
+// detectAPIVersion 检测 URL 路径中是否包含版本号（如 /v1, /v2, /v4 等）
+// 返回版本字符串（如 "v1", "v4"），未找到则返回空字符串
+func detectAPIVersion(apiURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || parsed == nil {
+		return ""
+	}
+
+	cleanPath := path.Clean(parsed.Path)
+	if cleanPath == "/" || cleanPath == "." {
+		return ""
+	}
+
+	segments := strings.Split(strings.Trim(cleanPath, "/"), "/")
+
+	// 检查每个路径段是否符合版本模式（v 后跟数字）
+	for _, segment := range segments {
+		if matched, _ := regexp.MatchString(`^v\d+$`, segment); matched {
+			return segment
+		}
+	}
+
+	return ""
+}
+
+// isCodexBackendURL 检查是否为 Codex 后端 URL
+func isCodexBackendURL(apiURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || parsed == nil {
+		return false
+	}
+
+	cleanPath := path.Clean(strings.TrimSpace(parsed.Path))
+	return strings.HasSuffix(cleanPath, "/backend-api/codex")
+}
+
+// buildModelsURL 为指定的 API URL 和转换器类型构建适当的模型 URL
+// 智能检测已有的版本号，避免重复
+func buildModelsURL(apiURL string, transformer string, isCodexBackend bool) string {
+	baseURL := strings.TrimSuffix(apiURL, "/")
+
+	// 特殊情况：Codex 后端直接使用 /models
+	if isCodexBackend {
+		return baseURL + "/models"
+	}
+
+	// 检测 URL 中已有的版本号
+	existingVersion := detectAPIVersion(baseURL)
+
+	switch strings.ToLower(transformer) {
+	case "gemini":
+		// Gemini 有特殊处理
+		if existingVersion != "" {
+			return baseURL + "/models"
+		}
+		return baseURL + "/v1beta/models"
+
+	case "openai", "openai2":
+		// OpenAI 兼容端点
+		if existingVersion != "" {
+			return baseURL + "/models"
+		}
+		return baseURL + "/v1/models"
+
+	default:
+		// 未知转换器默认使用 v1
+		if existingVersion != "" {
+			return baseURL + "/models"
+		}
+		return baseURL + "/v1/models"
+	}
 }
