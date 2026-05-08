@@ -1183,9 +1183,9 @@ func (s *SQLiteStorage) GetAPIKeys() ([]APIKeyWithPermissions, error) {
 		// 更新 API Key
 		_, err = tx.Exec(`
 			UPDATE api_keys
-			SET name = ?, enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+			SET name = ?, key_value = ?, enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, key.Name, key.Enabled, expiresAt, key.ID)
+		`, key.Name, key.KeyValue, key.Enabled, expiresAt, key.ID)
 		if err != nil {
 			return err
 		}
