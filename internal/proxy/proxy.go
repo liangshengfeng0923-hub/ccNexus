@@ -373,8 +373,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if ep, ok := autoSelectedEndpoint.(*config.Endpoint); ok {
 			logger.Debug("[API Key Auth] Using auto-selected endpoint from context: %s (model: %s)", ep.Name, ep.Model)
 			specifiedEndpoint = ep
-			// 自动选择端点时，使用端点配置的模型
-			if ep.Model != "" {
+			// 仅在用户未指定模型时，使用端点配置的模型作为覆盖值
+			userModel := strings.TrimSpace(streamReq.Model)
+			if ep.Model != "" && (userModel == "" || strings.HasPrefix(userModel, "@")) {
 				modelOverride = ep.Model
 				logger.Debug("[API Key Auth] Override model to: %s", modelOverride)
 			}
@@ -1026,6 +1027,24 @@ func (p *Proxy) __validateAPIKey(r *http.Request, w http.ResponseWriter, bodyByt
 
 	logger.DebugLog("[API Key Auth] Endpoint resolution: specifiedEndpoint=%v, modelOverride=%v, resolveErr=%v",
 		specifiedEndpoint, modelOverride, resolveErr)
+
+	// 检查请求体中是否有 @ 前缀（用户明确尝试通过模型名指定端点）
+	var rawRequestModel struct {
+		Model string `json:"model"`
+	}
+	hasAtPrefix := false
+	if len(bodyBytes) > 0 && json.Unmarshal(bodyBytes, &rawRequestModel) == nil {
+		hasAtPrefix = strings.HasPrefix(strings.TrimSpace(rawRequestModel.Model), "@")
+	}
+
+	// 如果用户用了 @ 前缀但解析失败，直接报错，不回退到自动选择
+	if hasAtPrefix && resolveErr != nil {
+		logger.Warn("[API Key Auth] User specified endpoint via @model but resolution failed: %v", resolveErr)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"` + resolveErr.Error() + `"}}`))
+		return false
+	}
 
 	// 打印 key 允许的端点列表
 	logger.DebugLog("[API Key Auth] Key '%s' permitted endpoints: %v", keyWithPermissions.Name, keyWithPermissions.EndpointNames)
