@@ -950,19 +950,13 @@ func isTransientNetworkError(err error) bool {
 	return false
 }
 
-// __validateAPIKey 验证 API Key 并检查端点权限（内部方法）
-func (p *Proxy) __validateAPIKey(r *http.Request, w http.ResponseWriter, bodyBytes []byte) bool {
-	// 从 Header 或 Query 参数获取 API Key
-	// 支持以下格式（密钥值直接使用，不做任何处理）：
-	// 1. X-API-Key: <密钥>
-	// 2. Authorization: Bearer <密钥>
-	// 3. ?api_key=<密钥>
+// __extractAPIKey 从请求中提取 API Key（内部方法）
+// 支持以下格式：1. X-API-Key header  2. Authorization: Bearer  3. ?api_key= query param
+func (p *Proxy) __extractAPIKey(r *http.Request) string {
 	apiKey := r.Header.Get("X-API-Key")
 	if apiKey == "" {
-		// 尝试从 Authorization header 获取
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "" {
-			// 支持 "Bearer token" 格式
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
 				apiKey = parts[1]
@@ -972,6 +966,12 @@ func (p *Proxy) __validateAPIKey(r *http.Request, w http.ResponseWriter, bodyByt
 	if apiKey == "" {
 		apiKey = r.URL.Query().Get("api_key")
 	}
+	return apiKey
+}
+
+// __validateAPIKey 验证 API Key 并检查端点权限（内部方法）
+func (p *Proxy) __validateAPIKey(r *http.Request, w http.ResponseWriter, bodyBytes []byte) bool {
+	apiKey := p.__extractAPIKey(r)
 
 	logger.DebugLog("[API Key Auth] API Key provided: %s", maskAPIKeyForLog(apiKey))
 

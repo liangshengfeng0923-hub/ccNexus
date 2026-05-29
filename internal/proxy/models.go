@@ -207,6 +207,35 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// API Key 权限过滤：开启校验时，仅返回该 Key 有权限的端点模型
+	var permittedEndpoints map[string]bool
+	if p.config.APIKeyAuthEnabled {
+		apiKey := p.__extractAPIKey(r)
+		if apiKey == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"type":"authentication_error","message":"API Key is required"}}`))
+			return
+		}
+		keyWithPermissions, err := p.storage.GetAPIKeyByKeyValue(apiKey)
+		if err != nil || keyWithPermissions == nil || !keyWithPermissions.Enabled {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"type":"authentication_error","message":"Invalid or disabled API Key"}}`))
+			return
+		}
+		if keyWithPermissions.ExpiresAt != nil && time.Now().After(*keyWithPermissions.ExpiresAt) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"type":"authentication_error","message":"API Key has expired"}}`))
+			return
+		}
+		permittedEndpoints = make(map[string]bool, len(keyWithPermissions.EndpointNames))
+		for _, name := range keyWithPermissions.EndpointNames {
+			permittedEndpoints[name] = true
+		}
+	}
+
 	// Check for refresh parameter
 	refresh := r.URL.Query().Get("refresh") == "true"
 	refreshEnabled := p.config.ModelsCacheRefreshEnabled
@@ -217,49 +246,61 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to get from cache if not refreshing
+	var allModels []ModelInfo
 	if !refresh {
 		if cached, ok := p.modelsCache.Get(); ok {
-			p.writeModelsResponse(w, cached)
-			return
+			allModels = cached
 		}
 	}
 
-	// Fetch from endpoints
-	endpoints := p.config.GetEndpoints()
-	allModels := []ModelInfo{}
-	allFailed := true
+	// Fetch from endpoints if cache miss or refreshing
+	if allModels == nil {
+		endpoints := p.config.GetEndpoints()
+		allModels = []ModelInfo{}
+		allFailed := true
 
-	for _, ep := range endpoints {
-		if !ep.Enabled {
+		for _, ep := range endpoints {
+			if !ep.Enabled {
+				continue
+			}
+
+			var models []ModelInfo
+			var err error
+
+			// Try to fetch from endpoint's /v1/models API
+			models, err = p.fetchModelsFromEndpoint(ep)
+			if err != nil {
+				// If fetch fails, use default models for this endpoint
+				logger.Debug("Failed to fetch models from %s: %v", ep.Name, err)
+				models = p.getDefaultModels(ep)
+			} else {
+				allFailed = false
+			}
+
+			allModels = append(allModels, models...)
+		}
+
+		if allFailed {
+			logger.Debug("All endpoints failed to fetch models, returning default models")
+		}
+
+		// Cache the result
+		p.modelsCache.Set(allModels)
+	}
+
+	// 按 API Key 权限过滤 + 转为 @endpoint/model 格式
+	var resultModels []ModelInfo
+	for _, m := range allModels {
+		if permittedEndpoints != nil && !permittedEndpoints[m.EndpointID] {
 			continue
 		}
-
-		var models []ModelInfo
-		var err error
-
-		// Try to fetch from endpoint's /v1/models API
-		models, err = p.fetchModelsFromEndpoint(ep)
-		if err != nil {
-		// If fetch fails, use default models for this endpoint
-		logger.Debug("Failed to fetch models from %s: %v", ep.Name, err)
-			models = p.getDefaultModels(ep)
-		} else {
-			allFailed = false
+		if permittedEndpoints != nil {
+			m.ID = "@" + m.EndpointID + "/" + m.ID
 		}
-
-		allModels = append(allModels, models...)
+		resultModels = append(resultModels, m)
 	}
 
-	// If all endpoints failed, still return the aggregated default models
-	if allFailed {
-		logger.Debug("All endpoints failed to fetch models, returning default models")
-	}
-
-	// Cache the result
-	p.modelsCache.Set(allModels)
-
-	// Write response
-	p.writeModelsResponse(w, allModels)
+	p.writeModelsResponse(w, resultModels)
 }
 
 // writeModelsResponse writes the models list response
@@ -268,8 +309,8 @@ func (p *Proxy) writeModelsResponse(w http.ResponseWriter, models []ModelInfo) {
 	w.WriteHeader(http.StatusOK)
 
 	response := struct {
-		Object string       `json:"object"`
-		Data   []ModelInfo  `json:"data"`
+		Object string      `json:"object"`
+		Data   []ModelInfo `json:"data"`
 	}{
 		Object: "list",
 		Data:   models,
