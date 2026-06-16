@@ -282,3 +282,91 @@ func (h *Handler) handleStatsAPIKeysSummary(w http.ResponseWriter, r *http.Reque
 		"keys": result,
 	})
 }
+
+// handleStatsAPIKeysPeriod 返回指定时间范围内所有 API Key 的聚合统计
+func (h *Handler) handleStatsAPIKeysPeriod(w http.ResponseWriter, r *http.Request) {
+	var startDate string
+	var endDate string
+	var err error
+	var statsMap map[int64]*storage.EndpointStats
+	var apiKeys []storage.APIKeyWithPermissions
+	var keyNames map[int64]string
+	var result []map[string]interface{}
+	var totalRequests int
+	var totalErrors int
+	var totalInputTokens int64
+	var totalOutputTokens int64
+
+	if r.Method != http.MethodGet {
+		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	startDate = r.URL.Query().Get("start")
+	endDate = r.URL.Query().Get("end")
+	if startDate == "" || endDate == "" {
+		WriteError(w, http.StatusBadRequest, "start and end query parameters are required")
+		return
+	}
+
+	statsMap, err = h.storage.GetAPIKeyPeriodStatsAggregated(startDate, endDate)
+	if err != nil {
+		logger.Error("Failed to get API key period stats: %v", err)
+		WriteError(w, http.StatusInternalServerError, "Failed to get API key period stats")
+		return
+	}
+
+	apiKeys, err = h.storage.GetAPIKeys()
+	if err != nil {
+		logger.Error("Failed to get API keys: %v", err)
+		WriteError(w, http.StatusInternalServerError, "Failed to get API keys")
+		return
+	}
+
+	/* 构建 keyId -> name 映射 */
+	keyNames = make(map[int64]string)
+	for _, ak := range apiKeys {
+		keyNames[ak.ID] = ak.Name
+	}
+
+	/* 构建每个 API Key 的统计数据 */
+	result = make([]map[string]interface{}, 0, len(apiKeys))
+	for _, ak := range apiKeys {
+		var stats *storage.EndpointStats
+		var name string
+
+		stats = statsMap[ak.ID]
+		if stats == nil {
+			stats = &storage.EndpointStats{}
+		}
+		name = keyNames[ak.ID]
+		if name == "" {
+			name = ak.Name
+		}
+
+		result = append(result, map[string]interface{}{
+			"id":           ak.ID,
+			"name":         name,
+			"enabled":      ak.Enabled,
+			"requests":     stats.Requests,
+			"errors":       stats.Errors,
+			"inputTokens":  stats.InputTokens,
+			"outputTokens": stats.OutputTokens,
+		})
+
+		totalRequests += stats.Requests
+		totalErrors += stats.Errors
+		totalInputTokens += stats.InputTokens
+		totalOutputTokens += stats.OutputTokens
+	}
+
+	WriteSuccess(w, map[string]interface{}{
+		"startDate":         startDate,
+		"endDate":           endDate,
+		"totalRequests":     totalRequests,
+		"totalErrors":       totalErrors,
+		"totalInputTokens":  totalInputTokens,
+		"totalOutputTokens": totalOutputTokens,
+		"keys":              result,
+	})
+}

@@ -1326,3 +1326,31 @@ func (s *SQLiteStorage) GetAPIKeyPeriodStats(keyId int64, startDate, endDate str
 	}
 	return results, rows.Err()
 }
+
+// GetAPIKeyPeriodStatsAggregated 获取所有 API Key 在日期范围内的聚合统计
+func (s *SQLiteStorage) GetAPIKeyPeriodStatsAggregated(startDate, endDate string) (map[int64]*EndpointStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT api_key_id, SUM(requests), SUM(errors), SUM(input_tokens), SUM(output_tokens)
+		FROM api_key_daily_stats
+		WHERE date >= ? AND date <= ?
+		GROUP BY api_key_id
+	`, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int64]*EndpointStats)
+	for rows.Next() {
+		var keyID int64
+		var stats EndpointStats
+		if err := rows.Scan(&keyID, &stats.Requests, &stats.Errors, &stats.InputTokens, &stats.OutputTokens); err != nil {
+			return nil, err
+		}
+		result[keyID] = &stats
+	}
+	return result, rows.Err()
+}

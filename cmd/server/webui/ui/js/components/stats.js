@@ -162,9 +162,68 @@ class Stats {
             }
 
             this.renderStats(data);
+
+            /* 加载同周期的 API Key 用量 */
+            if (data) {
+                var start = data.startDate || data.date;
+                var end = data.endDate || data.date;
+                this.loadAPIKeyPeriodStats(start, end);
+            }
         } catch (error) {
             notifications.error(`${t('stats.failedToLoad')}: ${error.message}`);
         }
+    }
+
+    async loadAPIKeyPeriodStats(start, end) {
+        var container = document.getElementById('apikey-period-stats');
+        if (!container) {
+            return;
+        }
+
+        try {
+            var data = await api.getAPIKeysStatsPeriod(start, end);
+            this.renderAPIKeyPeriodStats(data, container);
+        } catch (error) {
+            container.innerHTML = '';
+        }
+    }
+
+    renderAPIKeyPeriodStats(data, container) {
+        var keys = data.keys || [];
+        var totalRequests = data.totalRequests || 0;
+        var totalErrors = data.totalErrors || 0;
+        var totalInputTokens = data.totalInputTokens || 0;
+        var totalOutputTokens = data.totalOutputTokens || 0;
+        var totalTokens = totalInputTokens + totalOutputTokens;
+
+        container.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">🔑 ${t('stats.apiKeyBreakdown')}</h3>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-4 mb-3">
+                        <div class="stat-card">
+                            <div class="stat-label">${t('stats.totalRequests')}</div>
+                            <div class="stat-value">${formatNumber(totalRequests)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">${t('stats.successful')}</div>
+                            <div class="stat-value">${formatNumber(totalRequests - totalErrors)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">${t('stats.errors')}</div>
+                            <div class="stat-value">${formatNumber(totalErrors)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">${t('stats.totalTokens')}</div>
+                            <div class="stat-value">${formatTokens(totalTokens)}</div>
+                        </div>
+                    </div>
+                    ${this.renderAPIKeyTable(keys)}
+                </div>
+            </div>
+        `;
     }
 
     renderStats(data) {
@@ -199,6 +258,8 @@ class Stats {
                     ${this.renderEndpointTable(stats.endpoints || {})}
                 </div>
             </div>
+
+            <div id="apikey-period-stats" style="margin-top: 24px;"></div>
         `;
     }
 

@@ -113,6 +113,10 @@ class APIClient {
         return this.request('GET', '/stats/apikeys/summary');
     }
 
+    async getAPIKeysStatsPeriod(start, end) {
+        return this.request('GET', `/stats/apikeys/period?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+    }
+
     // Configuration
     async getConfig() {
         return this.request('GET', '/config');

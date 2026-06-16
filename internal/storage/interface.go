@@ -191,6 +191,7 @@ type Storage interface {
 	RecordAPIKeyDailyStat(stat *APIKeyDailyStat) error
 	GetAPIKeyTotalStats() (map[int64]*EndpointStats, error)
 	GetAPIKeyPeriodStats(keyId int64, startDate, endDate string) ([]APIKeyDailyStat, error)
+	GetAPIKeyPeriodStatsAggregated(startDate, endDate string) (map[int64]*EndpointStats, error)
 
 	// Close
 	Close() error
