@@ -181,12 +181,6 @@ func (p *Proxy) hasActiveRequests(endpointName string) bool {
 	return p.activeRequests[endpointName]
 }
 
-// isCurrentEndpoint checks if the given endpoint is still the current one
-func (p *Proxy) isCurrentEndpoint(endpointName string) bool {
-	current := p.getCurrentEndpoint()
-	return current.Name == endpointName
-}
-
 // getEndpointContext returns a context for the given endpoint, creating one if needed
 func (p *Proxy) getEndpointContext(endpointName string) context.Context {
 	p.ctxMu.Lock()
