@@ -140,6 +140,12 @@ func (p *Proxy) UpdateConfig(cfg *config.Config) error {
 
 	p.config = cfg
 
+	// Update resolver's endpoint function to use the new config
+	// This fixes a bug where new endpoints added via WebUI wouldn't be
+	// recognized in @endpoint syntax until service restart because the
+	// resolver's closure still referenced the old config instance.
+	p.resolver = NewEndpointResolverWithFunc(cfg.GetEndpoints)
+
 	// Try to find the previous current endpoint in new config
 	newEndpoints := p.getEnabledEndpoints()
 	if currentEndpointName != "" && len(newEndpoints) > 0 {
