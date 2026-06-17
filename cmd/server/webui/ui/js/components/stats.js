@@ -6,12 +6,28 @@ import { t } from '../utils/i18n.js';
 class Stats {
     constructor() {
         this.container = document.getElementById('view-container');
+        /* API Key 用量表格的排序状态：默认输入令牌降序 */
+        this.apiKeySortState = { column: 'inputTokens', direction: 'desc' };
         // 监听语言切换
         window.addEventListener('languageChanged', () => {
             if (state.get('currentView') === 'stats') {
                 this.render();
             }
         });
+    }
+
+    /* 按当前排序状态对 API Key 列表排序，返回新数组 */
+    sortAPIKeys(keys) {
+        const { column, direction } = this.apiKeySortState;
+        const sorted = [...keys].sort((a, b) => {
+            const va = a[column] || 0;
+            const vb = b[column] || 0;
+            return va - vb;
+        });
+        if (direction === 'desc') {
+            sorted.reverse();
+        }
+        return sorted;
     }
 
     async render() {
@@ -109,12 +125,22 @@ class Stats {
         document.getElementById('refresh-apikey-stats-btn').addEventListener('click', () => {
             this.loadAPIKeyStats();
         });
+
+        const scope = document.getElementById('apikey-stats-table');
+        if (scope) {
+            this.attachAPIKeySortHandlers(scope, keys);
+        }
     }
 
     renderAPIKeyTable(keys) {
-        if (keys.length === 0) {
+        const sorted = this.sortAPIKeys(keys);
+        if (sorted.length === 0) {
             return `<div class="empty-state"><p>${t('stats.noDataAvailable')}</p></div>`;
         }
+
+        const { column, direction } = this.apiKeySortState;
+        const thClass = (col) => column === col ? 'sortable sorted' : 'sortable';
+        const indicator = (col) => column === col ? (direction === 'desc' ? ' ▾' : ' ▴') : '';
 
         return `
             <div class="table-container">
@@ -124,13 +150,13 @@ class Stats {
                             <th>${t('stats.apiKey')}</th>
                             <th>${t('stats.requests')}</th>
                             <th>${t('stats.errors')}</th>
-                            <th>${t('stats.inputTokens')}</th>
-                            <th>${t('stats.outputTokens')}</th>
+                            <th class="${thClass('inputTokens')}" data-sort="inputTokens">${t('stats.inputTokens')}${indicator('inputTokens')}</th>
+                            <th class="${thClass('outputTokens')}" data-sort="outputTokens">${t('stats.outputTokens')}${indicator('outputTokens')}</th>
                             <th>${t('stats.lastUsedAt')}</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${keys.map(k => `
+                        ${sorted.map(k => `
                             <tr>
                                 <td><strong>${this.escapeHtml(k.name)}</strong></td>
                                 <td>${formatNumber(k.requests || 0)}</td>
@@ -144,6 +170,33 @@ class Stats {
                 </table>
             </div>
         `;
+    }
+
+    /* 绑定 API Key 表头排序点击事件；scope 为包含表格的容器，keys 为已缓存数据 */
+    attachAPIKeySortHandlers(scope, keys) {
+        const headers = scope.querySelectorAll('.sortable[data-sort]');
+        headers.forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.sort;
+                const { column, direction } = this.apiKeySortState;
+                if (column === col) {
+                    this.apiKeySortState.direction = direction === 'desc' ? 'asc' : 'desc';
+                } else {
+                    this.apiKeySortState.column = col;
+                    this.apiKeySortState.direction = 'desc';
+                }
+                this.refreshAPIKeyTable(scope, keys);
+            });
+        });
+    }
+
+    /* 用缓存的 keys 重新渲染容器内的表格并重新绑定排序事件 */
+    refreshAPIKeyTable(scope, keys) {
+        const tableContainer = scope.querySelector('.table-container');
+        if (tableContainer) {
+            tableContainer.outerHTML = this.renderAPIKeyTable(keys);
+            this.attachAPIKeySortHandlers(scope, keys);
+        }
     }
 
     async loadStats(period) {
@@ -183,6 +236,7 @@ class Stats {
         try {
             var data = await api.getAPIKeysStatsPeriod(start, end);
             this.renderAPIKeyPeriodStats(data, container);
+            this.attachAPIKeySortHandlers(container, data.keys || []);
         } catch (error) {
             container.innerHTML = '';
         }

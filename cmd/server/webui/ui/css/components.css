@@ -82,6 +82,21 @@
     letter-spacing: 0.05em;
 }
 
+.table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: color 0.15s ease;
+}
+
+.table th.sortable:hover {
+    color: var(--text-primary);
+}
+
+.table th.sortable.sorted {
+    color: var(--text-primary);
+}
+
 .table tbody tr:hover {
     background-color: var(--bg-secondary);
 }

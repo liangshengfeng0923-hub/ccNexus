@@ -348,6 +348,7 @@ func (h *Handler) handleStatsAPIKeysPeriod(w http.ResponseWriter, r *http.Reques
 			"id":           ak.ID,
 			"name":         name,
 			"enabled":      ak.Enabled,
+			"lastUsedAt":   ak.LastUsedAt,
 			"requests":     stats.Requests,
 			"errors":       stats.Errors,
 			"inputTokens":  stats.InputTokens,
