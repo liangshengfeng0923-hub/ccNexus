@@ -85,6 +85,11 @@ func extractTokenUsage(responseBody []byte) (int, int) {
 // Supports:
 // - Claude/OpenAI Responses: input_tokens/output_tokens
 // - OpenAI Chat: prompt_tokens/completion_tokens
+//
+// For Anthropic/Gemini prompt caching, cache_read_input_tokens are independently
+// billed and must be included in the total input token count.
+// cache_creation_input_tokens is already a subset of input_tokens, so it is NOT
+// added separately to avoid double counting.
 func extractInputOutputTokens(usage map[string]interface{}) (int, int) {
 	var inputTokens, outputTokens int
 
@@ -98,6 +103,11 @@ func extractInputOutputTokens(usage map[string]interface{}) (int, int) {
 		outputTokens = parseTokenNumber(output)
 	} else if output, ok := usage["completion_tokens"]; ok {
 		outputTokens = parseTokenNumber(output)
+	}
+
+	// Anthropic/Gemini prompt caching: cache_read_input_tokens are billed separately
+	if cacheRead, ok := usage["cache_read_input_tokens"]; ok {
+		inputTokens += parseTokenNumber(cacheRead)
 	}
 
 	return inputTokens, outputTokens

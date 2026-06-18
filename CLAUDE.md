@@ -193,3 +193,9 @@ int function_name(void) {
     int value = 0;  /* 错误：在可执行语句后声明 */
 }
 ```
+
+<!-- SPECKIT START -->
+**Current feature**: [修复 Token 计数遗漏缓存命中 Token](specs/001-fix-token-count-cache/plan.md)
+**Spec**: [spec.md](specs/001-fix-token-count-cache/spec.md)
+**Plan**: [plan.md](specs/001-fix-token-count-cache/plan.md)
+<!-- SPECKIT END -->
