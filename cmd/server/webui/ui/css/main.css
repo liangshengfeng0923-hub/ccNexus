@@ -246,6 +246,10 @@ p {
     grid-template-columns: repeat(4, 1fr);
 }
 
+.grid-cols-6 {
+    grid-template-columns: repeat(6, 1fr);
+}
+
 /* Utilities */
 .mt-1 { margin-top: 0.5rem; }
 .mt-2 { margin-top: 1rem; }
@@ -305,7 +309,8 @@ p {
 
     .grid-cols-2,
     .grid-cols-3,
-    .grid-cols-4 {
+    .grid-cols-4,
+    .grid-cols-6 {
         grid-template-columns: 1fr;
     }
 }

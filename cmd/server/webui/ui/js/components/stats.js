@@ -90,7 +90,7 @@ class Stats {
         });
 
         container.innerHTML = `
-            <div class="grid grid-cols-4 mb-4">
+            <div class="grid grid-cols-6 mb-4">
                 <div class="stat-card">
                     <div class="stat-label">${t('stats.totalRequests')}</div>
                     <div class="stat-value">${formatNumber(totalRequests)}</div>
@@ -106,6 +106,14 @@ class Stats {
                 <div class="stat-card">
                     <div class="stat-label">${t('stats.totalTokens')}</div>
                     <div class="stat-value">${formatTokens(totalInputTokens + totalOutputTokens)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.inputTokens')}</div>
+                    <div class="stat-value">${formatTokens(totalInputTokens)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.outputTokens')}</div>
+                    <div class="stat-value">${formatTokens(totalOutputTokens)}</div>
                 </div>
             </div>
 
@@ -147,6 +155,7 @@ class Stats {
                 <table class="table">
                     <thead>
                         <tr>
+                            <th>#</th>
                             <th>${t('stats.apiKey')}</th>
                             <th>${t('stats.requests')}</th>
                             <th>${t('stats.errors')}</th>
@@ -156,8 +165,9 @@ class Stats {
                         </tr>
                     </thead>
                     <tbody>
-                        ${sorted.map(k => `
+                        ${sorted.map((k, i) => `
                             <tr>
+                                <td>${i + 1}</td>
                                 <td><strong>${this.escapeHtml(k.name)}</strong></td>
                                 <td>${formatNumber(k.requests || 0)}</td>
                                 <td>${formatNumber(k.errors || 0)}</td>
@@ -256,7 +266,7 @@ class Stats {
                     <h3 class="card-title">🔑 ${t('stats.apiKeyBreakdown')}</h3>
                 </div>
                 <div class="card-body">
-                    <div class="grid grid-cols-4 mb-3">
+                    <div class="grid grid-cols-6 mb-3">
                         <div class="stat-card">
                             <div class="stat-label">${t('stats.totalRequests')}</div>
                             <div class="stat-value">${formatNumber(totalRequests)}</div>
@@ -273,6 +283,14 @@ class Stats {
                             <div class="stat-label">${t('stats.totalTokens')}</div>
                             <div class="stat-value">${formatTokens(totalTokens)}</div>
                         </div>
+                        <div class="stat-card">
+                            <div class="stat-label">${t('stats.inputTokens')}</div>
+                            <div class="stat-value">${formatTokens(totalInputTokens)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">${t('stats.outputTokens')}</div>
+                            <div class="stat-value">${formatTokens(totalOutputTokens)}</div>
+                        </div>
                     </div>
                     ${this.renderAPIKeyTable(keys)}
                 </div>
@@ -285,7 +303,7 @@ class Stats {
         const container = document.getElementById('stats-content');
 
         container.innerHTML = `
-            <div class="grid grid-cols-4 mb-4">
+            <div class="grid grid-cols-6 mb-4">
                 <div class="stat-card">
                     <div class="stat-label">${t('stats.totalRequests')}</div>
                     <div class="stat-value">${formatNumber(stats.totalRequests || 0)}</div>
@@ -301,6 +319,14 @@ class Stats {
                 <div class="stat-card">
                     <div class="stat-label">${t('stats.totalTokens')}</div>
                     <div class="stat-value">${formatTokens((stats.totalInputTokens || 0) + (stats.totalOutputTokens || 0))}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.inputTokens')}</div>
+                    <div class="stat-value">${formatTokens(stats.totalInputTokens || 0)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">${t('stats.outputTokens')}</div>
+                    <div class="stat-value">${formatTokens(stats.totalOutputTokens || 0)}</div>
                 </div>
             </div>
 
