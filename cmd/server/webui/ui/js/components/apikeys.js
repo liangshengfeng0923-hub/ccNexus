@@ -11,6 +11,11 @@ class APIKeys {
 		this.apiKeys = [];
 		this.endpoints = [];
 		this.config = { enabled: false };
+		this.filterState = {
+			searchQuery: '',
+			selectedEndpoints: new Set()
+		};
+		this.debounceTimer = null;
 		// 监听语言切换
 		window.addEventListener('languageChanged', () => {
 			if (state.get('currentView') === 'apikeys') {
@@ -19,7 +24,36 @@ class APIKeys {
 		});
 	}
 
+	get filteredKeys() {
+		let result = this.apiKeys;
+
+		if (this.filterState.searchQuery.trim()) {
+			const query = this.filterState.searchQuery.trim().toLowerCase();
+			result = result.filter(key =>
+				key.name && key.name.toLowerCase().includes(query)
+			);
+		}
+
+		if (this.filterState.selectedEndpoints.size > 0) {
+			result = result.filter(key =>
+				key.endpointNames && key.endpointNames.some(name =>
+					this.filterState.selectedEndpoints.has(name)
+				)
+			);
+		}
+
+		return result;
+	}
+
+	__resetFilterState() {
+		this.filterState.searchQuery = '';
+		this.filterState.selectedEndpoints.clear();
+		this.debounceTimer = null;
+	}
+
 	async render() {
+		this.__resetFilterState();
+
 		this.container.innerHTML = `
 			<div class="apikeys">
 				<div class="apikeys-header">
@@ -56,6 +90,25 @@ class APIKeys {
 						<h3>${t('apikeys.keyValue')}</h3>
 						<span class="apikeys-count" id="apikeys-total-count">0</span>
 					</div>
+					<div class="filter-bar">
+						<div class="search-input-wrapper">
+							<span class="search-icon">🔍</span>
+							<input type="search" class="search-input" id="apikey-search-input"
+								placeholder="${t('apikeys.searchPlaceholder')}">
+							<button class="search-clear" id="apikey-search-clear" title="${t('apikeys.clearFilters')}">×</button>
+						</div>
+						<div class="endpoint-filter" id="endpoint-filter">
+							<button class="endpoint-filter-trigger" id="endpoint-filter-trigger">
+								<span class="trigger-icon">📌</span>
+								<span class="trigger-text" id="endpoint-trigger-text">${t('apikeys.filterByEndpoint')}</span>
+								<span class="filter-chips" id="endpoint-chips"></span>
+								<span class="arrow" id="endpoint-arrow">▾</span>
+							</button>
+							<div class="dropdown-panel" id="endpoint-dropdown-panel">
+								<div class="dropdown-empty">${t('apikeys.noEndpointsAvailable')}</div>
+							</div>
+						</div>
+					</div>
 					<div class="card-body">
 						<div id="apikeys-table"></div>
 					</div>
@@ -63,9 +116,11 @@ class APIKeys {
 			</div>
 		`;
 
+		this.__bindFilterEvents();
 		document.getElementById('add-apikey-btn').addEventListener('click', () => this.showAddModal());
 		document.getElementById('apikeys-config-btn').addEventListener('click', () => this.showConfigModal());
 
+		await this.loadEndpoints();
 		await this.loadAPIKeys();
 		await this.loadConfig();
 	}
@@ -111,9 +166,20 @@ class APIKeys {
 	renderTable() {
 		const container = document.getElementById('apikeys-table');
 		const countEl = document.getElementById('apikeys-total-count');
+		const displayKeys = this.filteredKeys;
+		const totalCount = this.apiKeys.length;
+		const filteredCount = displayKeys.length;
+		const hasActiveFilters = this.filterState.searchQuery.trim() !== '' ||
+			this.filterState.selectedEndpoints.size > 0;
 
 		if (countEl) {
-			countEl.textContent = this.apiKeys.length;
+			if (hasActiveFilters && filteredCount !== totalCount) {
+				countEl.textContent = `${filteredCount} / ${totalCount}`;
+				countEl.classList.add('filtered');
+			} else {
+				countEl.textContent = totalCount;
+				countEl.classList.remove('filtered');
+			}
 		}
 
 		if (this.apiKeys.length === 0) {
@@ -129,7 +195,33 @@ class APIKeys {
 					</button>
 				</div>
 			`;
-			document.getElementById('empty-add-btn').addEventListener('click', () => this.showAddModal());
+			const addBtn = document.getElementById('empty-add-btn');
+			if (addBtn) addBtn.addEventListener('click', () => this.showAddModal());
+			return;
+		}
+
+		if (displayKeys.length === 0) {
+			const hasSearch = this.filterState.searchQuery.trim() !== '';
+			const hasEndpoint = this.filterState.selectedEndpoints.size > 0;
+
+			let emptyMessage = t('apikeys.noKeys');
+			if (hasSearch && hasEndpoint) {
+				emptyMessage = t('apikeys.noCombinedFilterResults');
+			} else if (hasSearch) {
+				emptyMessage = t('apikeys.noSearchResults').replace('{keyword}', this.filterState.searchQuery.trim());
+			} else if (hasEndpoint) {
+				emptyMessage = t('apikeys.noEndpointFilterResults');
+			}
+
+			container.innerHTML = `
+				<div class="empty-state filter-empty-state">
+					<div class="empty-state-icon-wrapper">
+						<span class="empty-state-icon">🔍</span>
+					</div>
+					<div class="empty-state-title">${t('common.noData')}</div>
+					<div class="empty-state-message">${emptyMessage}</div>
+				</div>
+			`;
 			return;
 		}
 
@@ -148,7 +240,7 @@ class APIKeys {
 						</tr>
 					</thead>
 					<tbody>
-						${this.apiKeys.map(key => this.renderKeyRow(key)).join('')}
+						${displayKeys.map(key => this.renderKeyRow(key)).join('')}
 					</tbody>
 				</table>
 			</div>
@@ -204,6 +296,189 @@ class APIKeys {
 	maskKey(key) {
 		if (key.length <= 8) return key;
 		return key.substring(0, 8) + '...' + key.substring(key.length - 4);
+	}
+
+	__bindFilterEvents() {
+		const searchInput = document.getElementById('apikey-search-input');
+		const searchClear = document.getElementById('apikey-search-clear');
+		const triggerBtn = document.getElementById('endpoint-filter-trigger');
+
+		if (searchInput) {
+			searchInput.addEventListener('input', (e) => {
+				this.__onSearchInput(e);
+			});
+		}
+
+		if (searchClear) {
+			searchClear.addEventListener('click', () => {
+				this.__clearSearch();
+			});
+		}
+
+		if (triggerBtn) {
+			triggerBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				this.__toggleDropdown();
+			});
+		}
+
+		document.addEventListener('click', (e) => {
+			const filterEl = document.getElementById('endpoint-filter');
+			if (filterEl && !filterEl.contains(e.target)) {
+				this.__closeDropdown();
+			}
+		});
+
+		document.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') {
+				this.__closeDropdown();
+			}
+		});
+	}
+
+	__onSearchInput(e) {
+		const value = e.target.value;
+		const clearBtn = document.getElementById('apikey-search-clear');
+
+		if (clearBtn) {
+			clearBtn.classList.toggle('visible', value.length > 0);
+		}
+
+		clearTimeout(this.debounceTimer);
+		this.debounceTimer = setTimeout(() => {
+			this.filterState.searchQuery = value;
+			this.renderTable();
+		}, 300);
+	}
+
+	__clearSearch() {
+		const searchInput = document.getElementById('apikey-search-input');
+		const clearBtn = document.getElementById('apikey-search-clear');
+
+		if (searchInput) {
+			searchInput.value = '';
+		}
+		if (clearBtn) {
+			clearBtn.classList.remove('visible');
+		}
+
+		this.filterState.searchQuery = '';
+		this.renderTable();
+	}
+
+	__toggleDropdown() {
+		const panel = document.getElementById('endpoint-dropdown-panel');
+		const arrow = document.getElementById('endpoint-arrow');
+
+		if (panel && panel.classList.contains('open')) {
+			this.__closeDropdown();
+		} else if (panel) {
+			panel.classList.add('open');
+			if (arrow) arrow.classList.add('open');
+		}
+	}
+
+	__closeDropdown() {
+		const panel = document.getElementById('endpoint-dropdown-panel');
+		const arrow = document.getElementById('endpoint-arrow');
+
+		if (panel) panel.classList.remove('open');
+		if (arrow) arrow.classList.remove('open');
+	}
+
+	__onEndpointOptionChange(endpointName, checked) {
+		if (checked) {
+			this.filterState.selectedEndpoints.add(endpointName);
+		} else {
+			this.filterState.selectedEndpoints.delete(endpointName);
+		}
+		this.__renderFilterChips();
+		this.renderTable();
+	}
+
+	__removeEndpointFilter(endpointName) {
+		this.filterState.selectedEndpoints.delete(endpointName);
+
+		const checkbox = document.querySelector(`.dropdown-option input[value="${this.escapeHtml(endpointName)}"]`);
+		if (checkbox) checkbox.checked = false;
+
+		this.__renderFilterChips();
+		this.renderTable();
+	}
+
+	__clearEndpointFilters() {
+		this.filterState.selectedEndpoints.clear();
+
+		document.querySelectorAll('.dropdown-option input[type="checkbox"]').forEach(cb => {
+			cb.checked = false;
+		});
+
+		this.__renderFilterChips();
+		this.renderTable();
+	}
+
+	__renderFilterChips() {
+		const chipsContainer = document.getElementById('endpoint-chips');
+		const triggerText = document.getElementById('endpoint-trigger-text');
+
+		if (!chipsContainer) return;
+
+		if (this.filterState.selectedEndpoints.size === 0) {
+			chipsContainer.innerHTML = '';
+			if (triggerText) triggerText.style.display = '';
+			return;
+		}
+
+		if (triggerText) triggerText.style.display = 'none';
+
+		chipsContainer.innerHTML = Array.from(this.filterState.selectedEndpoints).map(name =>
+			`<span class="filter-chip">${this.escapeHtml(name)}<button class="chip-remove" data-endpoint="${this.escapeHtml(name)}">×</button></span>`
+		).join('');
+
+		chipsContainer.querySelectorAll('.chip-remove').forEach(btn => {
+			btn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				this.__removeEndpointFilter(btn.dataset.endpoint);
+			});
+		});
+	}
+
+	__renderDropdownOptions() {
+		const panel = document.getElementById('endpoint-dropdown-panel');
+
+		if (!panel) return;
+
+		if (this.endpoints.length === 0) {
+			panel.innerHTML = `<div class="dropdown-empty">${t('apikeys.noEndpointsAvailable')}</div>`;
+			return;
+		}
+
+		panel.innerHTML = `
+			<div class="dropdown-panel-header">
+				<span class="dropdown-count">${this.endpoints.length} ${t('endpoints.title')}</span>
+				<button class="clear-all" id="clear-all-endpoints">${t('apikeys.clearFilters')}</button>
+			</div>
+			${this.endpoints.map(ep => `
+				<label class="dropdown-option">
+					<input type="checkbox" value="${this.escapeHtml(ep.name)}"
+						${this.filterState.selectedEndpoints.has(ep.name) ? 'checked' : ''}>
+					<span>${this.escapeHtml(ep.name)}</span>
+				</label>
+			`).join('')}
+		`;
+
+		panel.querySelectorAll('.dropdown-option input[type="checkbox"]').forEach(cb => {
+			cb.addEventListener('change', () => {
+				this.__onEndpointOptionChange(cb.value, cb.checked);
+			});
+		});
+
+		const clearAllBtn = document.getElementById('clear-all-endpoints');
+		if (clearAllBtn) {
+			clearAllBtn.addEventListener('click', () => {
+				this.__clearEndpointFilters();
+			});
+		}
 	}
 
 	escapeHtml(str) {
@@ -474,6 +749,7 @@ class APIKeys {
 		try {
 			const data = await api.getEndpoints();
 			this.endpoints = (data.endpoints || []).filter(ep => ep.enabled);
+			this.__renderDropdownOptions();
 		} catch (error) {
 			console.error('Failed to load endpoints:', error);
 			notifications.error('Failed to load endpoints');

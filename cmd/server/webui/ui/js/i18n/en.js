@@ -253,6 +253,13 @@ export default {
         failedToUpdate: 'Failed to update',
         failedToDelete: 'Failed to delete',
         failedToRegenerate: 'Failed to regenerate',
-        failedToUpdateConfig: 'Failed to update configuration'
+        failedToUpdateConfig: 'Failed to update configuration',
+        searchPlaceholder: 'Search by name...',
+        filterByEndpoint: 'Filter by endpoint',
+        clearFilters: 'Clear all',
+        noEndpointsAvailable: 'No endpoints available',
+        noSearchResults: 'No keys matching "{keyword}"',
+        noEndpointFilterResults: 'No keys associated with selected endpoints',
+        noCombinedFilterResults: 'No keys matching both name and endpoint filters'
     }
 };

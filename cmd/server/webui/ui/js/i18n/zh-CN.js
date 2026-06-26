@@ -253,6 +253,13 @@ export default {
         failedToUpdate: '更新失败',
         failedToDelete: '删除失败',
         failedToRegenerate: '重新生成失败',
-        failedToUpdateConfig: '更新配置失败'
+        failedToUpdateConfig: '更新配置失败',
+        searchPlaceholder: '搜索密钥名称...',
+        filterByEndpoint: '按端点筛选',
+        clearFilters: '清除全部',
+        noEndpointsAvailable: '无可选端点',
+        noSearchResults: '没有匹配"{keyword}"的密钥',
+        noEndpointFilterResults: '没有关联所选端点的密钥',
+        noCombinedFilterResults: '没有同时匹配名称和端点条件的密钥'
     }
 };
