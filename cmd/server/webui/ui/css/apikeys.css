@@ -516,6 +516,14 @@
     vertical-align: middle;
 }
 
+.apikeys-table .table .row-index {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    width: 2.5rem;
+    padding: 1.25rem 1rem;
+}
+
 .apikeys-table .table tbody tr {
     transition: all 0.2s ease;
     animation: tableRowFadeIn 0.3s ease-out both;

@@ -230,6 +230,7 @@ class APIKeys {
 				<table class="table apikeys-table">
 					<thead>
 						<tr>
+							<th>#</th>
 							<th>${t('common.name')}</th>
 							<th>${t('apikeys.keyValue')}</th>
 							<th>${t('apikeys.endpoints')}</th>
@@ -240,7 +241,7 @@ class APIKeys {
 						</tr>
 					</thead>
 					<tbody>
-						${displayKeys.map(key => this.renderKeyRow(key)).join('')}
+						${displayKeys.map((key, i) => this.renderKeyRow(key, i)).join('')}
 					</tbody>
 				</table>
 			</div>
@@ -249,7 +250,7 @@ class APIKeys {
 		this.attachEventListeners();
 	}
 
-	renderKeyRow(key) {
+	renderKeyRow(key, index) {
 		const maskedKey = this.maskKey(key.keyValue);
 		const expiresText = key.expiresAt ? new Date(key.expiresAt).toLocaleString() : t('apikeys.never');
 		const lastUsedText = key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : '-';
@@ -257,6 +258,7 @@ class APIKeys {
 
 		return `
 			<tr data-key-id="${key.id}">
+				<td class="row-index">${index + 1}</td>
 				<td>
 					<span class="key-name">${this.escapeHtml(key.name)}</span>
 				</td>
